@@ -1,0 +1,95 @@
+name: Build iOS Unsigned IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE22: true
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+
+    steps:
+      # ───────── 1. Récupère le code ─────────
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # ───────── 2. Node 22 (fix Node 20 deprecated) ─────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # ───────── 3. Installe Capacitor CLI GLOBAL (fix "could not determine executable") ─────────
+      - name: Install Capacitor CLI globally
+        run: npm install -g @capacitor/cli@6
+
+      # ───────── 4. Installe les dépendances du projet ─────────
+      - name: Install dependencies
+        run: npm install
+
+      # ───────── 5. Copie les plugins Capacitor dans www/ (fix plugins HTML pur) ─────────
+      - name: Copy Capacitor plugins to www
+        run: |
+          mkdir -p www/plugins
+          cp node_modules/@capacitor/filesystem/dist/plugin.js www/plugins/filesystem.js
+          cp node_modules/@capacitor/preferences/dist/plugin.js www/plugins/preferences.js
+          cp node_modules/@capacitor/splash-screen/dist/plugin.js www/plugins/splash-screen.js
+          # Copie aussi le runtime Capacitor (chargé par cap sync normalement, mais on sécurise)
+          cp node_modules/@capacitor/core/dist/capacitor.js www/capacitor.js || true
+
+      # ───────── 6. Génère les icônes iOS depuis resources/icon.png ─────────
+      - name: Generate iOS icons
+        run: npx capacitor-assets generate --ios
+
+      # ───────── 7. Ajoute la plateforme iOS ─────────
+      - name: Add iOS platform
+        run: npx cap add ios
+
+      # ───────── 8. Sync Capacitor (copie www/ → ios/App/App/public/) ─────────
+      - name: Sync Capacitor
+        run: npx cap sync ios
+
+      # ───────── 9. Installe CocoaPods ─────────
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios/App
+          pod install --repo-update
+
+      # ───────── 10. Build UNSIGNED IPA ─────────
+      - name: Build unsigned IPA
+        run: |
+          cd ios/App
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            | xcpretty || true
+
+      # ───────── 11. Empaquette l'IPA ─────────
+      - name: Package IPA
+        run: |
+          cd ios/App
+          mkdir -p Payload
+          cp -r build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -r App-unsigned.ipa Payload
+          ls -la App-unsigned.ipa
+
+      # ───────── 12. Upload artefact ─────────
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ios-unsigned-ipa
+          path: ios/App/App-unsigned.ipa
+          retention-days: 30
