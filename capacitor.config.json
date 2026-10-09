@@ -1,0 +1,16 @@
+{
+  "appId": "org.ecolia.app",
+  "appName": "ECOLIA",
+  "webDir": "www",
+  "server": {
+    "iosScheme": "capacitor",
+    "allowNavigation": [
+      "ecolia-course.github.io",
+      "*.github.io"
+    ]
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}
